@@ -15,12 +15,20 @@ const client = new Client({
 });
 
 const ffmpegPath = require('ffmpeg-static');
+const { DisTubeVoice } = require('distube');
 const distube = new DisTube(client, {
   emitNewSongOnly: true,
   emitAddSongWhenCreatingQueue: false,
   emitAddListWhenCreatingQueue: false,
+  joinNewVoiceChannel: true,
+  nsfw: false,
   ffmpeg: {
     path: ffmpegPath,
+    args: {
+      global: { loglevel: 'quiet' },
+      input: {},
+      output: { b: '128k' },
+    },
   },
 });
 const commands = [
