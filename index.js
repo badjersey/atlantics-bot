@@ -14,12 +14,15 @@ const client = new Client({
   ],
 });
 
+const ffmpegPath = require('ffmpeg-static');
 const distube = new DisTube(client, {
   emitNewSongOnly: true,
   emitAddSongWhenCreatingQueue: false,
   emitAddListWhenCreatingQueue: false,
+  ffmpeg: {
+    path: ffmpegPath,
+  },
 });
-
 const commands = [
   new SlashCommandBuilder().setName('play').setDescription('🎵 Putar lagu dari YouTube').addStringOption(opt => opt.setName('query').setDescription('Nama lagu atau URL').setRequired(true)),
   new SlashCommandBuilder().setName('skip').setDescription('⏭️ Lewati lagu'),
