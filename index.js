@@ -1,10 +1,13 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, entersState, StreamType } = require('@discordjs/voice');
 const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v10');
 const playdl = require('play-dl');
 const ytSearch = require('yt-search');
 require('dotenv').config();
+
+// Fix opus
+const { OpusEncoder } = require('@discordjs/opus');
 
 const client = new Client({
   intents: [
@@ -19,18 +22,18 @@ const queues = new Map();
 
 const commands = [
   new SlashCommandBuilder().setName('play').setDescription('🎵 Putar lagu dari YouTube').addStringOption(opt => opt.setName('query').setDescription('Nama lagu atau URL YouTube').setRequired(true)),
-  new SlashCommandBuilder().setName('skip').setDescription('⏭️ Lewati lagu yang sedang diputar'),
-  new SlashCommandBuilder().setName('stop').setDescription('⏹️ Hentikan musik dan kosongkan antrian'),
-  new SlashCommandBuilder().setName('queue').setDescription('📋 Tampilkan antrian lagu'),
+  new SlashCommandBuilder().setName('skip').setDescription('⏭️ Lewati lagu'),
+  new SlashCommandBuilder().setName('stop').setDescription('⏹️ Hentikan musik'),
+  new SlashCommandBuilder().setName('queue').setDescription('📋 Tampilkan antrian'),
   new SlashCommandBuilder().setName('pause').setDescription('⏸️ Jeda lagu'),
   new SlashCommandBuilder().setName('resume').setDescription('▶️ Lanjutkan lagu'),
-  new SlashCommandBuilder().setName('nowplaying').setDescription('🎶 Tampilkan lagu yang sedang diputar'),
-  new SlashCommandBuilder().setName('volume').setDescription('🔊 Atur volume (1-100)').addIntegerOption(opt => opt.setName('level').setDescription('Level volume 1-100').setRequired(true).setMinValue(1).setMaxValue(100)),
-  new SlashCommandBuilder().setName('shuffle').setDescription('🔀 Acak antrian lagu'),
-  new SlashCommandBuilder().setName('loop').setDescription('🔁 Toggle mode loop lagu'),
-  new SlashCommandBuilder().setName('remove').setDescription('🗑️ Hapus lagu dari antrian').addIntegerOption(opt => opt.setName('posisi').setDescription('Posisi lagu di antrian').setRequired(true).setMinValue(1)),
-  new SlashCommandBuilder().setName('ping').setDescription('🏓 Cek latensi bot'),
-  new SlashCommandBuilder().setName('help').setDescription('📖 Tampilkan semua perintah'),
+  new SlashCommandBuilder().setName('nowplaying').setDescription('🎶 Lagu yang sedang diputar'),
+  new SlashCommandBuilder().setName('volume').setDescription('🔊 Atur volume (1-100)').addIntegerOption(opt => opt.setName('level').setDescription('Level volume').setRequired(true).setMinValue(1).setMaxValue(100)),
+  new SlashCommandBuilder().setName('shuffle').setDescription('🔀 Acak antrian'),
+  new SlashCommandBuilder().setName('loop').setDescription('🔁 Toggle loop'),
+  new SlashCommandBuilder().setName('remove').setDescription('🗑️ Hapus lagu dari antrian').addIntegerOption(opt => opt.setName('posisi').setDescription('Posisi lagu').setRequired(true).setMinValue(1)),
+  new SlashCommandBuilder().setName('ping').setDescription('🏓 Cek latensi'),
+  new SlashCommandBuilder().setName('help').setDescription('📖 Daftar perintah'),
 ].map(cmd => cmd.toJSON());
 
 async function registerCommands() {
@@ -38,9 +41,9 @@ async function registerCommands() {
   try {
     console.log('🔄 Mendaftarkan slash commands...');
     await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
-    console.log('✅ Slash commands berhasil didaftarkan!');
+    console.log('✅ Slash commands berhasil!');
   } catch (err) {
-    console.error('❌ Gagal mendaftarkan commands:', err);
+    console.error('❌ Error:', err);
   }
 }
 
@@ -67,8 +70,20 @@ async function playSong(guildId) {
   queue.currentSong = song;
 
   try {
-    const stream = await playdl.stream(song.url, { quality: 2 });
-    const resource = createAudioResource(stream.stream, { inputType: stream.type, inlineVolume: true });
+    console.log(`🎵 Memutar: ${song.title}`);
+    
+    const stream = await playdl.stream(song.url, { 
+      quality: 2,
+      discordPlayerCompatibility: true
+    });
+    
+    console.log(`📡 Stream type: ${stream.type}`);
+    
+    const resource = createAudioResource(stream.stream, { 
+      inputType: StreamType.Opus,
+      inlineVolume: true
+    });
+    
     resource.volume?.setVolume(queue.volume / 100);
     queue.player.play(resource);
     queue.playing = true;
@@ -119,18 +134,17 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (commandName === 'help') {
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor('#5865F2').setTitle("🌊 Atlantic's Music Bot — Daftar Perintah").addFields(
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor('#5865F2').setTitle("🌊 Atlantic's Music Bot").addFields(
       { name: '🎵 Musik', value: '`/play` `/skip` `/stop` `/pause` `/resume`' },
       { name: '📋 Antrian', value: '`/queue` `/shuffle` `/remove` `/loop`' },
-      { name: '🔊 Pengaturan', value: '`/volume` `/nowplaying`' },
-      { name: '🛠️ Lainnya', value: '`/ping` `/help`' },
+      { name: '🔊 Lainnya', value: '`/volume` `/nowplaying` `/ping` `/help`' },
     ).setFooter({ text: "Atlantic's Music Bot 🌊" }).setTimestamp()] });
   }
 
   const voiceChannel = member.voice?.channel;
 
   if (commandName === 'play') {
-    if (!voiceChannel) return interaction.reply({ content: '❌ Kamu harus masuk ke **voice channel** dulu!', ephemeral: true });
+    if (!voiceChannel) return interaction.reply({ content: '❌ Masuk voice channel dulu!', ephemeral: true });
     await interaction.deferReply();
     const query = interaction.options.getString('query');
 
@@ -156,17 +170,40 @@ client.on('interactionCreate', async (interaction) => {
       queue.textChannel = channel;
 
       if (!queue.connection) {
-        const connection = joinVoiceChannel({ channelId: voiceChannel.id, guildId: guild.id, adapterCreator: guild.voiceAdapterCreator });
+        const connection = joinVoiceChannel({ 
+          channelId: voiceChannel.id, 
+          guildId: guild.id, 
+          adapterCreator: guild.voiceAdapterCreator,
+          selfDeaf: false,
+          selfMute: false
+        });
+        
         const player = createAudioPlayer();
         connection.subscribe(player);
         queue.connection = connection;
         queue.player = player;
 
-        player.on(AudioPlayerStatus.Idle, () => { if (!queue.loop) queue.songs.shift(); playSong(guild.id); });
-        player.on('error', (err) => { console.error('Player error:', err); queue.songs.shift(); playSong(guild.id); });
+        player.on(AudioPlayerStatus.Idle, () => { 
+          if (!queue.loop) queue.songs.shift(); 
+          playSong(guild.id); 
+        });
+        
+        player.on('error', (err) => { 
+          console.error('❌ Player error:', err); 
+          queue.songs.shift(); 
+          playSong(guild.id); 
+        });
+        
         connection.on(VoiceConnectionStatus.Disconnected, async () => {
-          try { await Promise.race([entersState(connection, VoiceConnectionStatus.Signalling, 5000), entersState(connection, VoiceConnectionStatus.Connecting, 5000)]); }
-          catch { connection.destroy(); queues.delete(guild.id); }
+          try { 
+            await Promise.race([
+              entersState(connection, VoiceConnectionStatus.Signalling, 5000), 
+              entersState(connection, VoiceConnectionStatus.Connecting, 5000)
+            ]); 
+          } catch { 
+            connection.destroy(); 
+            queues.delete(guild.id); 
+          }
         });
       }
 
@@ -179,7 +216,7 @@ client.on('interactionCreate', async (interaction) => {
       }
     } catch (err) {
       console.error(err);
-      interaction.editReply('❌ Terjadi error saat mencari lagu. Coba lagi!');
+      interaction.editReply('❌ Error saat mencari lagu. Coba lagi!');
     }
   }
 
@@ -205,7 +242,7 @@ client.on('interactionCreate', async (interaction) => {
 
   if (commandName === 'resume') {
     const queue = getQueue(guild.id);
-    if (!queue.paused) return interaction.reply({ content: '❌ Musik tidak sedang dijeda!', ephemeral: true });
+    if (!queue.paused) return interaction.reply({ content: '❌ Musik tidak dijeda!', ephemeral: true });
     queue.player?.unpause(); queue.paused = false;
     return interaction.reply({ embeds: [new EmbedBuilder().setColor('#57F287').setDescription('▶️ Musik dilanjutkan!')] });
   }
@@ -220,21 +257,21 @@ client.on('interactionCreate', async (interaction) => {
     const queue = getQueue(guild.id);
     const level = interaction.options.getInteger('level');
     queue.volume = level;
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor('#5865F2').setDescription(`🔊 Volume diatur ke **${level}%**`)] });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor('#5865F2').setDescription(`🔊 Volume: **${level}%**`)] });
   }
 
   if (commandName === 'queue') {
     const queue = getQueue(guild.id);
     if (queue.songs.length === 0) return interaction.reply({ content: '📋 Antrian kosong!', ephemeral: true });
     const list = queue.songs.slice(0, 10).map((s, i) => `**${i + 1}.** ${s.title} — \`${s.duration}\``).join('\n');
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor('#5865F2').setTitle('📋 Antrian Lagu').setDescription(list).setFooter({ text: `Total: ${queue.songs.length} lagu | Atlantic's Music Bot 🌊` })] });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor('#5865F2').setTitle('📋 Antrian').setDescription(list).setFooter({ text: `Total: ${queue.songs.length} lagu` })] });
   }
 
   if (commandName === 'nowplaying') {
     const queue = getQueue(guild.id);
     if (!queue.currentSong) return interaction.reply({ content: '❌ Tidak ada lagu!', ephemeral: true });
     const s = queue.currentSong;
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor('#5865F2').setTitle('🎶 Sekarang Diputar').setDescription(`**[${s.title}](${s.url})**`).addFields({ name: '👤 Diminta oleh', value: s.requestedBy, inline: true }).setThumbnail(s.thumbnail).setFooter({ text: "Atlantic's Music Bot 🌊" })] });
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor('#5865F2').setTitle('🎶 Sekarang Diputar').setDescription(`**[${s.title}](${s.url})**`).addFields({ name: '👤 Diminta oleh', value: s.requestedBy }).setThumbnail(s.thumbnail).setFooter({ text: "Atlantic's Music Bot 🌊" })] });
   }
 
   if (commandName === 'shuffle') {
